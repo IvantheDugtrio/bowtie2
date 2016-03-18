@@ -295,15 +295,7 @@ public:
             } 
             else 
             {
-                while(!_done[this->_itrBucketIdx]) 
-                {
-#if defined(_TTHREAD_WIN32_)
-                    Sleep(1);
-#else
-                    const static timespec ts = {0, 1000000};  // 1 millisecond
-                    nanosleep(&ts, NULL);
-#endif
-                }
+                while(!_done[this->_itrBucketIdx]) {}
                 // Read suffixes from a file
                 std::ostringstream number; number << this->_itrBucketIdx;
                 const string fname = _base_fname + "." + number.str() + ".sa";
@@ -477,7 +469,7 @@ private:
 #endif
     EList<pair<KarkkainenBlockwiseSA*, int> > _tparams;
     ELList<TIndexOffU>      _itrBuckets;  /// buckets
-    bool*             _done;        /// is a block processed?
+    volatile bool*            _done;        /// is a block processed?
 };
 
 
