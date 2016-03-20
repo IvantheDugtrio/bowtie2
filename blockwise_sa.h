@@ -213,7 +213,7 @@ public:
 #ifdef WITH_TBB
 ,thread_group_started(false)
 #endif
-    { _randomSrc.init(__seed); reset(); _done = new bool[_nthreads]; }
+    { _randomSrc.init(__seed); reset(); }
     
     ~KarkkainenBlockwiseSA()
     {
@@ -225,8 +225,8 @@ public:
                 _threads[tid]->join();
                 delete _threads[tid];
             }
+            delete [] _done;
         }
-        delete [] _done;
 #endif
     }
     
@@ -261,6 +261,7 @@ public:
             if(_threads.size() == 0) 
             {
 #endif
+		_done = new bool[_sampleSuffs.size() + 1];
                 _itrBuckets.resize(this->_nthreads);
                 _tparams.resize(this->_nthreads);
                 for(int tid = 0; tid < this->_nthreads; tid++) {
@@ -301,7 +302,7 @@ public:
                 const string fname = _base_fname + "." + number.str() + ".sa";
                 ifstream sa_file(fname.c_str(), ios::binary);
                 if(!sa_file.good()) {
-                    cerr << "Could not open file for reading a reference graph: \"" << fname << "\"" << endl;
+                    cerr << "Could not open file for reading a suffix array: \"" << fname << "\"" << endl;
                     throw 1;
                 }
                 size_t numSAs = readU<TIndexOffU>(sa_file, _bigEndian);
