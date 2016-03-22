@@ -39,23 +39,26 @@
 # include "fast_mutex.h"
 #endif
 
-#ifdef NO_SPINLOCK
+#ifdef WITH_SPINLOCK
 # ifdef WITH_TBB
-#   ifdef WITH_QUEUELOCK
-#  	define MUTEX_T tbb::queuing_mutex
+#  	define MUTEX_T tbb::spin_mutex
 #   else
-#       define MUTEX_T tbb::mutex
+#  	define MUTEX_T tthread::fast_mutex
 #   endif
+#elif WITH_HEAVYLOCK
+# ifdef WITH_TBB
+#  	define MUTEX_T tbb::mutex
+#   else
+#  	define MUTEX_T tthread::mutex
+#   endif
+#else
+# ifdef WITH_TBB
+#	define WITH_QUEUELOCK 1
+#  	define MUTEX_T tbb::queuing_mutex
 # else
 #   define MUTEX_T tthread::mutex
 # endif
-#else
-# ifdef WITH_TBB
-#  	define MUTEX_T tbb::spin_mutex
-# else
-#  	define MUTEX_T tthread::fast_mutex
-# endif
-#endif /* NO_SPINLOCK */
+#endif /* WITH_SPINLOCK */
 
 
 /**
@@ -70,7 +73,8 @@ public:
 	
     ThreadSafe(MUTEX_T* ptr_mutex, bool locked = true) {
 		if(locked) {
-#if WITH_TBB && WITH_QUEUELOCK
+//#if WITH_TBB && !defined WITH_SPINLOCK && !defined WITH_HEAVYLOCK
+#ifdef WITH_QUEUELOCK
 		    //have to use the heap as we can't copy
 		    //the scoped lock
 		    this->ptr_mutex = new MUTEX_T::scoped_lock(*ptr_mutex);
@@ -87,7 +91,7 @@ public:
 	void unlock()
 	{
 	    if (ptr_mutex != NULL)
-#if WITH_TBB && WITH_QUEUELOCK
+#ifdef WITH_QUEUELOCK
 	    	delete ptr_mutex;
 	}
 #else
@@ -100,7 +104,7 @@ public:
 	}
     
 private:
-#if WITH_TBB && WITH_QUEUELOCK
+#ifdef WITH_QUEUELOCK
 	MUTEX_T::scoped_lock* ptr_mutex;
 #else
 	MUTEX_T *ptr_mutex;

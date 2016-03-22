@@ -82,10 +82,6 @@ else
 	PTHREAD_LIB = -lpthread
 endif
 
-ifeq (1,$(NO_SPINLOCK))
-	override EXTRA_FLAGS += -DNO_SPINLOCK
-endif
-
 ifeq (1,$(WITH_TBB))
 	LIBS = $(PTHREAD_LIB) -ltbb -ltbbmalloc_proxy
 	override EXTRA_FLAGS += -DWITH_TBB
@@ -109,9 +105,17 @@ ifeq (1,$(WITH_AFFINITY))
 	override EXTRA_FLAGS += -DWITH_AFFINITY=1
 endif
 
-ifeq (1,$(WITH_QUEUELOCK))
-	override EXTRA_FLAGS += -DWITH_QUEUELOCK=1
+ifeq (1,$(WITH_SPINLOCK))
+	override EXTRA_FLAGS += -DWITH_SPINLOCK=1
 endif
+
+ifeq (1,$(WITH_HEAVYLOCK))
+	override EXTRA_FLAGS += -DWITH_HEAVYLOCK=1
+endif
+
+#ifeq (1,$(WITH_QUEUELOCK))
+#	override EXTRA_FLAGS += -DWITH_QUEUELOCK=1
+#endif
 
 SHARED_CPPS = ccnt_lut.cpp ref_read.cpp alphabet.cpp shmem.cpp \
               edit.cpp bt2_idx.cpp bt2_io.cpp bt2_util.cpp \
