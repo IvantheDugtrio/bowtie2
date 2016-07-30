@@ -1,6 +1,6 @@
 Bowtie 2: http://bowtie-bio.sf.net/bowtie2
 
-![Build Status](https://travis-ci.org/IvantheDugtrio/bowtie2.svg?branch=master)](https://travis-ci.org/IvantheDugtrio/bowtie2)
+![Build Status](https://travis-ci.org/IvantheDugtrio/bowtie2.svg?branch=master)
 
  - See AUTHORS for information about who wrote Bowtie 2 and its various
    components.
