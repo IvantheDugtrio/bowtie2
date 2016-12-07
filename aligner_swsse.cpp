@@ -27,44 +27,44 @@
  * matrix buffer to accomodate the needed configuration of vectors.
  */
 void SSEMatrix::init(
-	size_t nrow,
-	size_t ncol,
-	size_t wperv)
+    size_t nrow,
+    size_t ncol,
+    size_t wperv)
 {
-	nrow_ = nrow;
-	ncol_ = ncol;
-	wperv_ = wperv;
-	nvecPerCol_ = (nrow + (wperv-1)) / wperv;
-	// The +1 is so that we don't have to special-case the final column;
-	// instead, we just write off the end of the useful part of the table
-	// with pvEStore.
-	try {
-		matbuf_.resizeNoCopy((ncol+1) * nvecPerCell_ * nvecPerCol_);
-	} catch(exception& e) {
-		cerr << "Tried to allocate DP matrix with " << (ncol+1)
-		     << " columns, " << nvecPerCol_
-			 << " vectors per column, and and " << nvecPerCell_
-			 << " vectors per cell" << endl;
-		throw e;
-	}
-	assert(wperv_ == 8 || wperv_ == 16);
-	vecshift_ = (wperv_ == 8) ? 3 : 4;
-	nvecrow_ = (nrow + (wperv_-1)) >> vecshift_;
-	nveccol_ = ncol;
-	colstride_ = nvecPerCol_ * nvecPerCell_;
-	rowstride_ = nvecPerCell_;
-	inited_ = true;
+    nrow_ = nrow;
+    ncol_ = ncol;
+    wperv_ = wperv;
+    nvecPerCol_ = (nrow + (wperv-1)) / wperv;
+    // The +1 is so that we don't have to special-case the final column;
+    // instead, we just write off the end of the useful part of the table
+    // with pvEStore.
+    try {
+        matbuf_.resizeNoCopy((ncol+1) * nvecPerCell_ * nvecPerCol_);
+    } catch(exception& e) {
+        cerr << "Tried to allocate DP matrix with " << (ncol+1)
+             << " columns, " << nvecPerCol_
+             << " vectors per column, and and " << nvecPerCell_
+             << " vectors per cell" << endl;
+        throw e;
+    }
+    assert(wperv_ == 8 || wperv_ == 16);
+    vecshift_ = (wperv_ == 8) ? 3 : 4;
+    nvecrow_ = (nrow + (wperv_-1)) >> vecshift_;
+    nveccol_ = ncol;
+    colstride_ = nvecPerCol_ * nvecPerCell_;
+    rowstride_ = nvecPerCell_;
+    inited_ = true;
 }
 
 /**
  * Initialize the matrix of masks and backtracking flags.
  */
 void SSEMatrix::initMasks() {
-	assert_gt(nrow_, 0);
-	assert_gt(ncol_, 0);
-	masks_.resize(nrow_);
-	reset_.resizeNoCopy(nrow_);
-	reset_.fill(false);
+    assert_gt(nrow_, 0);
+    assert_gt(ncol_, 0);
+    masks_.resize(nrow_);
+    reset_.resizeNoCopy(nrow_);
+    reset_.fill(false);
 }
 
 /**
@@ -72,17 +72,17 @@ void SSEMatrix::initMasks() {
  * element.
  */
 int SSEMatrix::eltSlow(size_t row, size_t col, size_t mat) const {
-	assert_lt(row, nrow_);
-	assert_lt(col, ncol_);
-	assert_leq(mat, 3);
-	// Move to beginning of column/row
-	size_t rowelt = row / nvecrow_;
-	size_t rowvec = row % nvecrow_;
-	size_t eltvec = (col * colstride_) + (rowvec * rowstride_) + mat;
-	if(wperv_ == 16) {
-		return (int)((uint8_t*)(matbuf_.ptr() + eltvec))[rowelt];
-	} else {
-		assert_eq(8, wperv_);
-		return (int)((int16_t*)(matbuf_.ptr() + eltvec))[rowelt];
-	}
+    assert_lt(row, nrow_);
+    assert_lt(col, ncol_);
+    assert_leq(mat, 3);
+    // Move to beginning of column/row
+    size_t rowelt = row / nvecrow_;
+    size_t rowvec = row % nvecrow_;
+    size_t eltvec = (col * colstride_) + (rowvec * rowstride_) + mat;
+    if(wperv_ == 16) {
+        return (int)((uint8_t*)(matbuf_.ptr() + eltvec))[rowelt];
+    } else {
+        assert_eq(8, wperv_);
+        return (int)((int16_t*)(matbuf_.ptr() + eltvec))[rowelt];
+    }
 }

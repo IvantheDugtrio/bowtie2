@@ -149,6 +149,9 @@ SEARCH_FRAGMENTS = $(wildcard search_*_phase*.c)
 VERSION = $(shell cat VERSION)
 
 BITS=32
+ifeq (ppc64,$(shell uname -m))
+	BITS=64
+endif
 ifeq (x86_64,$(shell uname -m))
 	BITS=64
 endif
@@ -165,7 +168,11 @@ ifeq (32,$(BITS))
   $(error bowtie2 compilation requires a 64-bit platform )
 endif
 
-SSE_FLAG=-msse2 
+ifeq (ppc64,$(shell uname -m))
+	SSE_FLAG=
+else
+SSE_FLAG=-msse2
+endif
 
 DEBUG_FLAGS    = -O0 -g3 -m64 $(SSE_FLAG)
 DEBUG_DEFS     = -DCOMPILER_OPTIONS="\"$(DEBUG_FLAGS) $(EXTRA_FLAGS)\""
@@ -211,9 +218,9 @@ GENERAL_LIST = $(wildcard scripts/*.sh) \
 ifeq (1,$(WINDOWS))
 	BOWTIE2_BIN_LIST := $(BOWTIE2_BIN_LIST) bowtie2.bat bowtie2-build.bat bowtie2-inspect.bat 
     ifeq (1,$(WITH_TBB)) 
-	    override EXTRA_FLAGS += -static-libgcc -static-libstdc++
+		override EXTRA_FLAGS += -static-libgcc -static-libstdc++
 	else
-	    override EXTRA_FLAGS += -static -static-libgcc -static-libstdc++
+		override EXTRA_FLAGS += -static -static-libgcc -static-libstdc++
 	endif
 endif
 
@@ -449,9 +456,9 @@ doc: doc/manual.html MANUAL
 doc/manual.html: MANUAL.markdown
 	echo "<h1>Table of Contents</h1>" > .tmp.head
 	pandoc -T "Bowtie 2 Manual" -B .tmp.head \
-	       --css style.css -o $@ \
-	       --from markdown --to HTML \
-	       --table-of-contents $^
+		   --css style.css -o $@ \
+		   --from markdown --to HTML \
+		   --table-of-contents $^
 	rm -f .tmp.head
 
 MANUAL: MANUAL.markdown

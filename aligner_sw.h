@@ -70,7 +70,11 @@
 #include <iostream>
 #include <limits>
 #include "threading.h"
+#ifdef __PPC64__
+#include "vec128intlib.h"
+#elif __SSE2__
 #include <emmintrin.h>
+#endif
 #include "aligner_sw_common.h"
 #include "aligner_sw_nuc.h"
 #include "ds.h"
@@ -85,10 +89,10 @@
 #include "aligner_bt.h"
 
 #define QUAL2(d, f) sc_->mm((int)(*rd_)[rdi_ + d], \
-							(int)  rf_ [rfi_ + f], \
-							(int)(*qu_)[rdi_ + d] - 33)
+                            (int)  rf_ [rfi_ + f], \
+                            (int)(*qu_)[rdi_ + d] - 33)
 #define QUAL(d)     sc_->mm((int)(*rd_)[rdi_ + d], \
-							(int)(*qu_)[rdi_ + d] - 33)
+                            (int)(*qu_)[rdi_ + d] - 33)
 #define N_SNP_PEN(c) (((int)rf_[rfi_ + c] > 15) ? sc_->n(30) : sc_->penSnp)
 
 /**
@@ -191,467 +195,467 @@
  */
 class SwAligner {
 
-	typedef std::pair<size_t, size_t> SizeTPair;
+    typedef std::pair<size_t, size_t> SizeTPair;
 
-	// States that the aligner can be in
-	enum {
-		STATE_UNINIT,  // init() hasn't been called yet
-		STATE_INITED,  // init() has been called, but not align()
-		STATE_ALIGNED, // align() has been called
-	};
-	
-	const static size_t ALPHA_SIZE = 5;
+    // States that the aligner can be in
+    enum {
+        STATE_UNINIT,  // init() hasn't been called yet
+        STATE_INITED,  // init() has been called, but not align()
+        STATE_ALIGNED, // align() has been called
+    };
+    
+    const static size_t ALPHA_SIZE = 5;
 
 public:
 
-	explicit SwAligner(std::ostream *dpLog, bool firstRead = true) :
-		sseU8fw_(DP_CAT),
-		sseU8rc_(DP_CAT),
-		sseI16fw_(DP_CAT),
-		sseI16rc_(DP_CAT),
-		state_(STATE_UNINIT),
-		initedRead_(false),
-		readSse16_(false),
-		initedRef_(false),
-		rfwbuf_(DP_CAT),
-		btnstack_(DP_CAT),
-		btcells_(DP_CAT),
-		btdiag_(),
-		btncand_(DP_CAT),
-		btncanddone_(DP_CAT),
-		btncanddoneSucc_(0),
-		btncanddoneFail_(0),
-		cper_(),
-		cperMinlen_(),
-		cperPerPow2_(),
-		cperEf_(),
-		cperTri_(),
-		colstop_(0),
-		lastsolcol_(0),
-		cural_(0),
-		dpLog_(dpLog),
-		firstRead_(firstRead)
-		ASSERT_ONLY(, cand_tmp_(DP_CAT))
-	{ }
+    explicit SwAligner(std::ostream *dpLog, bool firstRead = true) :
+        sseU8fw_(DP_CAT),
+        sseU8rc_(DP_CAT),
+        sseI16fw_(DP_CAT),
+        sseI16rc_(DP_CAT),
+        state_(STATE_UNINIT),
+        initedRead_(false),
+        readSse16_(false),
+        initedRef_(false),
+        rfwbuf_(DP_CAT),
+        btnstack_(DP_CAT),
+        btcells_(DP_CAT),
+        btdiag_(),
+        btncand_(DP_CAT),
+        btncanddone_(DP_CAT),
+        btncanddoneSucc_(0),
+        btncanddoneFail_(0),
+        cper_(),
+        cperMinlen_(),
+        cperPerPow2_(),
+        cperEf_(),
+        cperTri_(),
+        colstop_(0),
+        lastsolcol_(0),
+        cural_(0),
+        dpLog_(dpLog),
+        firstRead_(firstRead)
+        ASSERT_ONLY(, cand_tmp_(DP_CAT))
+    { }
 
-	/**
-	 * Prepare the dynamic programming driver with a new read and a new scoring
-	 * scheme.
-	 */
-	void initRead(
-		const BTDnaString& rdfw, // read sequence for fw read
-		const BTDnaString& rdrc, // read sequence for rc read
-		const BTString& qufw,    // read qualities for fw read
-		const BTString& qurc,    // read qualities for rc read
-		size_t rdi,              // offset of first read char to align
-		size_t rdf,              // offset of last read char to align
-		const Scoring& sc);      // scoring scheme
-	
-	/**
-	 * Initialize with a new alignment problem.
-	 */
-	void initRef(
-		bool fw,               // whether to forward or revcomp read is aligning
-		TRefId refidx,         // id of reference aligned against
-		const DPRect& rect,    // DP rectangle
-		char *rf,              // reference sequence
-		size_t rfi,            // offset of first reference char to align to
-		size_t rff,            // offset of last reference char to align to
-		TRefOff reflen,        // length of reference sequence
-		const Scoring& sc,     // scoring scheme
-		TAlScore minsc,        // minimum score
-		bool enable8,          // use 8-bit SSE if possible?
-		size_t cminlen,        // minimum length for using checkpointing scheme
-		size_t cpow2,          // interval b/t checkpointed diags; 1 << this
-		bool doTri,            // triangular mini-fills?
-		bool extend);          // true iff this is a seed extension
+    /**
+     * Prepare the dynamic programming driver with a new read and a new scoring
+     * scheme.
+     */
+    void initRead(
+        const BTDnaString& rdfw, // read sequence for fw read
+        const BTDnaString& rdrc, // read sequence for rc read
+        const BTString& qufw,    // read qualities for fw read
+        const BTString& qurc,    // read qualities for rc read
+        size_t rdi,              // offset of first read char to align
+        size_t rdf,              // offset of last read char to align
+        const Scoring& sc);      // scoring scheme
+    
+    /**
+     * Initialize with a new alignment problem.
+     */
+    void initRef(
+        bool fw,               // whether to forward or revcomp read is aligning
+        TRefId refidx,         // id of reference aligned against
+        const DPRect& rect,    // DP rectangle
+        char *rf,              // reference sequence
+        size_t rfi,            // offset of first reference char to align to
+        size_t rff,            // offset of last reference char to align to
+        TRefOff reflen,        // length of reference sequence
+        const Scoring& sc,     // scoring scheme
+        TAlScore minsc,        // minimum score
+        bool enable8,          // use 8-bit SSE if possible?
+        size_t cminlen,        // minimum length for using checkpointing scheme
+        size_t cpow2,          // interval b/t checkpointed diags; 1 << this
+        bool doTri,            // triangular mini-fills?
+        bool extend);          // true iff this is a seed extension
 
-	/**
-	 * Given a read, an alignment orientation, a range of characters in a
-	 * referece sequence, and a bit-encoded version of the reference,
-	 * execute the corresponding dynamic programming problem.
-	 *
-	 * Here we expect that the caller has already narrowed down the relevant
-	 * portion of the reference (e.g. using a seed hit) and all we do is
-	 * banded dynamic programming in the vicinity of that portion.  This is not
-	 * the function to call if we are trying to solve the whole alignment
-	 * problem with dynamic programming (that is TODO).
-	 *
-	 * Returns true if an alignment was found, false otherwise.
-	 */
-	void initRef(
-		bool fw,               // whether to forward or revcomp read aligned
-		TRefId refidx,         // reference aligned against
-		const DPRect& rect,    // DP rectangle
-		const BitPairReference& refs, // Reference strings
-		TRefOff reflen,        // length of reference sequence
-		const Scoring& sc,     // scoring scheme
-		TAlScore minsc,        // minimum alignment score
-		bool enable8,          // use 8-bit SSE if possible?
-		size_t cminlen,        // minimum length for using checkpointing scheme
-		size_t cpow2,          // interval b/t checkpointed diags; 1 << this
-		bool doTri,            // triangular mini-fills?
-		bool extend,           // true iff this is a seed extension
-		size_t  upto,          // count the number of Ns up to this offset
-		size_t& nsUpto);       // output: the number of Ns up to 'upto'
+    /**
+     * Given a read, an alignment orientation, a range of characters in a
+     * referece sequence, and a bit-encoded version of the reference,
+     * execute the corresponding dynamic programming problem.
+     *
+     * Here we expect that the caller has already narrowed down the relevant
+     * portion of the reference (e.g. using a seed hit) and all we do is
+     * banded dynamic programming in the vicinity of that portion.  This is not
+     * the function to call if we are trying to solve the whole alignment
+     * problem with dynamic programming (that is TODO).
+     *
+     * Returns true if an alignment was found, false otherwise.
+     */
+    void initRef(
+        bool fw,               // whether to forward or revcomp read aligned
+        TRefId refidx,         // reference aligned against
+        const DPRect& rect,    // DP rectangle
+        const BitPairReference& refs, // Reference strings
+        TRefOff reflen,        // length of reference sequence
+        const Scoring& sc,     // scoring scheme
+        TAlScore minsc,        // minimum alignment score
+        bool enable8,          // use 8-bit SSE if possible?
+        size_t cminlen,        // minimum length for using checkpointing scheme
+        size_t cpow2,          // interval b/t checkpointed diags; 1 << this
+        bool doTri,            // triangular mini-fills?
+        bool extend,           // true iff this is a seed extension
+        size_t  upto,          // count the number of Ns up to this offset
+        size_t& nsUpto);       // output: the number of Ns up to 'upto'
 
-	/**
-	 * Given a read, an alignment orientation, a range of characters in a
-	 * referece sequence, and a bit-encoded version of the reference, set up
-	 * and execute the corresponding ungapped alignment problem.  There can
-	 * only be one solution.
-	 *
-	 * The caller has already narrowed down the relevant portion of the
-	 * reference.
-	 *
-	 * Does not handle the case where we'd like to scan a large section of the
-	 * reference for an ungapped alignment, e.g., if we're searching for the
-	 * opposite mate after finding an alignment for the anchor mate.
-	 */
-	int ungappedAlign(
-		const BTDnaString&      rd,     // read sequence (could be RC)
-		const BTString&         qu,     // qual sequence (could be rev)
-		const Coord&            coord,  // coordinate aligned to
-		const BitPairReference& refs,   // Reference strings
-		size_t                  reflen, // length of reference sequence
-		const Scoring&          sc,     // scoring scheme
-		bool                    ohang,  // allow overhang?
-		TAlScore                minsc,  // minimum score
-		SwResult&               res);   // put alignment result here
+    /**
+     * Given a read, an alignment orientation, a range of characters in a
+     * referece sequence, and a bit-encoded version of the reference, set up
+     * and execute the corresponding ungapped alignment problem.  There can
+     * only be one solution.
+     *
+     * The caller has already narrowed down the relevant portion of the
+     * reference.
+     *
+     * Does not handle the case where we'd like to scan a large section of the
+     * reference for an ungapped alignment, e.g., if we're searching for the
+     * opposite mate after finding an alignment for the anchor mate.
+     */
+    int ungappedAlign(
+        const BTDnaString&      rd,     // read sequence (could be RC)
+        const BTString&         qu,     // qual sequence (could be rev)
+        const Coord&            coord,  // coordinate aligned to
+        const BitPairReference& refs,   // Reference strings
+        size_t                  reflen, // length of reference sequence
+        const Scoring&          sc,     // scoring scheme
+        bool                    ohang,  // allow overhang?
+        TAlScore                minsc,  // minimum score
+        SwResult&               res);   // put alignment result here
 
-	/**
-	 * Align read 'rd' to reference using read & reference information given
-	 * last time init() was called.  Uses dynamic programming.
-	 */
-	bool align(TAlScore& best);
-	
-	/**
-	 * Populate the given SwResult with information about the "next best"
-	 * alignment if there is one.  If there isn't one, false is returned.  Note
-	 * that false might be returned even though a call to done() would have
-	 * returned false.
-	 */
-	bool nextAlignment(
-		SwResult& res,
-		TAlScore minsc,
-		RandomSource& rnd);
-	
-	/**
-	 * Print out an alignment result as an ASCII DP table.
-	 */
-	void printResultStacked(
-		const SwResult& res,
-		std::ostream& os)
-	{
-		res.alres.printStacked(*rd_, os);
-	}
-	
-	/**
-	 * Return true iff there are no more solution cells to backtace from.
-	 * Note that this may return false in situations where there are actually
-	 * no more solutions, but that hasn't been discovered yet.
-	 */
-	bool done() const {
-		assert(initedRead() && initedRef());
-		return cural_ == btncand_.size();
-	}
+    /**
+     * Align read 'rd' to reference using read & reference information given
+     * last time init() was called.  Uses dynamic programming.
+     */
+    bool align(TAlScore& best);
+    
+    /**
+     * Populate the given SwResult with information about the "next best"
+     * alignment if there is one.  If there isn't one, false is returned.  Note
+     * that false might be returned even though a call to done() would have
+     * returned false.
+     */
+    bool nextAlignment(
+        SwResult& res,
+        TAlScore minsc,
+        RandomSource& rnd);
+    
+    /**
+     * Print out an alignment result as an ASCII DP table.
+     */
+    void printResultStacked(
+        const SwResult& res,
+        std::ostream& os)
+    {
+        res.alres.printStacked(*rd_, os);
+    }
+    
+    /**
+     * Return true iff there are no more solution cells to backtace from.
+     * Note that this may return false in situations where there are actually
+     * no more solutions, but that hasn't been discovered yet.
+     */
+    bool done() const {
+        assert(initedRead() && initedRef());
+        return cural_ == btncand_.size();
+    }
 
-	/**
-	 * Return true iff this SwAligner has been initialized with a read to align.
-	 */
-	inline bool initedRef() const { return initedRef_; }
+    /**
+     * Return true iff this SwAligner has been initialized with a read to align.
+     */
+    inline bool initedRef() const { return initedRef_; }
 
-	/**
-	 * Return true iff this SwAligner has been initialized with a reference to
-	 * align against.
-	 */
-	inline bool initedRead() const { return initedRead_; }
-	
-	/**
-	 * Reset, signaling that we're done with this dynamic programming problem
-	 * and won't be asking for any more alignments.
-	 */
-	inline void reset() { initedRef_ = initedRead_ = false; }
+    /**
+     * Return true iff this SwAligner has been initialized with a reference to
+     * align against.
+     */
+    inline bool initedRead() const { return initedRead_; }
+    
+    /**
+     * Reset, signaling that we're done with this dynamic programming problem
+     * and won't be asking for any more alignments.
+     */
+    inline void reset() { initedRef_ = initedRead_ = false; }
 
 #ifndef NDEBUG
-	/**
-	 * Check that aligner is internally consistent.
-	 */
-	bool repOk() const {
-		assert_gt(dpRows(), 0);
-		// Check btncand_
-		for(size_t i = 0; i < btncand_.size(); i++) {
-			assert(btncand_[i].repOk());
-			assert_geq(btncand_[i].score, minsc_);
-		}
-		return true;
-	}
+    /**
+     * Check that aligner is internally consistent.
+     */
+    bool repOk() const {
+        assert_gt(dpRows(), 0);
+        // Check btncand_
+        for(size_t i = 0; i < btncand_.size(); i++) {
+            assert(btncand_[i].repOk());
+            assert_geq(btncand_[i].score, minsc_);
+        }
+        return true;
+    }
 #endif
-	
-	/**
-	 * Return the number of alignments given out so far by nextAlignment().
-	 */
-	size_t numAlignmentsReported() const { return cural_; }
+    
+    /**
+     * Return the number of alignments given out so far by nextAlignment().
+     */
+    size_t numAlignmentsReported() const { return cural_; }
 
-	/**
-	 * Merge tallies in the counters related to filling the DP table.
-	 */
-	void merge(
-		SSEMetrics& sseU8ExtendMet,
-		SSEMetrics& sseU8MateMet,
-		SSEMetrics& sseI16ExtendMet,
-		SSEMetrics& sseI16MateMet,
-		uint64_t&   nbtfiltst,
-		uint64_t&   nbtfiltsc,
-		uint64_t&   nbtfiltdo)
-	{
-		sseU8ExtendMet.merge(sseU8ExtendMet_);
-		sseU8MateMet.merge(sseU8MateMet_);
-		sseI16ExtendMet.merge(sseI16ExtendMet_);
-		sseI16MateMet.merge(sseI16MateMet_);
-		nbtfiltst += nbtfiltst_;
-		nbtfiltsc += nbtfiltsc_;
-		nbtfiltdo += nbtfiltdo_;
-	}
-	
-	/**
-	 * Reset all the counters related to filling in the DP table to 0.
-	 */
-	void resetCounters() {
-		sseU8ExtendMet_.reset();
-		sseU8MateMet_.reset();
-		sseI16ExtendMet_.reset();
-		sseI16MateMet_.reset();
-		nbtfiltst_ = nbtfiltsc_ = nbtfiltdo_ = 0;
-	}
-	
-	/**
-	 * Return the size of the DP problem.
-	 */
-	size_t size() const {
-		return dpRows() * (rff_ - rfi_);
-	}
+    /**
+     * Merge tallies in the counters related to filling the DP table.
+     */
+    void merge(
+        SSEMetrics& sseU8ExtendMet,
+        SSEMetrics& sseU8MateMet,
+        SSEMetrics& sseI16ExtendMet,
+        SSEMetrics& sseI16MateMet,
+        uint64_t&   nbtfiltst,
+        uint64_t&   nbtfiltsc,
+        uint64_t&   nbtfiltdo)
+    {
+        sseU8ExtendMet.merge(sseU8ExtendMet_);
+        sseU8MateMet.merge(sseU8MateMet_);
+        sseI16ExtendMet.merge(sseI16ExtendMet_);
+        sseI16MateMet.merge(sseI16MateMet_);
+        nbtfiltst += nbtfiltst_;
+        nbtfiltsc += nbtfiltsc_;
+        nbtfiltdo += nbtfiltdo_;
+    }
+    
+    /**
+     * Reset all the counters related to filling in the DP table to 0.
+     */
+    void resetCounters() {
+        sseU8ExtendMet_.reset();
+        sseU8MateMet_.reset();
+        sseI16ExtendMet_.reset();
+        sseI16MateMet_.reset();
+        nbtfiltst_ = nbtfiltsc_ = nbtfiltdo_ = 0;
+    }
+    
+    /**
+     * Return the size of the DP problem.
+     */
+    size_t size() const {
+        return dpRows() * (rff_ - rfi_);
+    }
 
 protected:
-	
-	/**
-	 * Return the number of rows that will be in the dynamic programming table.
-	 */
-	inline size_t dpRows() const {
-		assert(initedRead_);
-		return rdf_ - rdi_;
-	}
+    
+    /**
+     * Return the number of rows that will be in the dynamic programming table.
+     */
+    inline size_t dpRows() const {
+        assert(initedRead_);
+        return rdf_ - rdi_;
+    }
 
-	/**
-	 * Align nucleotides from read 'rd' to the reference string 'rf' using
-	 * vector instructions.  Return the score of the best alignment found, or
-	 * the minimum integer if an alignment could not be found.  Flag is set to
-	 * 0 if an alignment is found, -1 if no valid alignment is found, or -2 if
-	 * the score saturated at any point during alignment.
-	 */
-	TAlScore alignNucleotidesEnd2EndSseU8(  // unsigned 8-bit elements
-		int& flag, bool debug);
-	TAlScore alignNucleotidesLocalSseU8(    // unsigned 8-bit elements
-		int& flag, bool debug);
-	TAlScore alignNucleotidesEnd2EndSseI16( // signed 16-bit elements
-		int& flag, bool debug);
-	TAlScore alignNucleotidesLocalSseI16(   // signed 16-bit elements
-		int& flag, bool debug);
-	
-	/**
-	 * Aligns by filling a dynamic programming matrix with the SSE-accelerated,
-	 * banded DP approach of Farrar.  As it goes, it determines which cells we
-	 * might backtrace from and tallies the best (highest-scoring) N backtrace
-	 * candidate cells per diagonal.  Also returns the alignment score of the best
-	 * alignment in the matrix.
-	 *
-	 * This routine does *not* maintain a matrix holding the entire matrix worth of
-	 * scores, nor does it maintain any other dense O(mn) data structure, as this
-	 * would quickly exhaust memory for queries longer than about 10,000 kb.
-	 * Instead, in the fill stage it maintains two columns worth of scores at a
-	 * time (current/previous, or right/left) - these take O(m) space.  When
-	 * finished with the current column, it determines which cells from the
-	 * previous column, if any, are candidates we might backtrace from to find a
-	 * full alignment.  A candidate cell has a score that rises above the threshold
-	 * and isn't improved upon by a match in the next column.  The best N
-	 * candidates per diagonal are stored in a O(m + n) data structure.
-	 */
-	TAlScore alignGatherEE8(                // unsigned 8-bit elements
-		int& flag, bool debug);
-	TAlScore alignGatherLoc8(               // unsigned 8-bit elements
-		int& flag, bool debug);
-	TAlScore alignGatherEE16(               // signed 16-bit elements
-		int& flag, bool debug);
-	TAlScore alignGatherLoc16(              // signed 16-bit elements
-		int& flag, bool debug);
-	
-	/**
-	 * Build query profile look up tables for the read.  The query profile look
-	 * up table is organized as a 1D array indexed by [i][j] where i is the
-	 * reference character in the current DP column (0=A, 1=C, etc), and j is
-	 * the segment of the query we're currently working on.
-	 */
-	void buildQueryProfileEnd2EndSseU8(bool fw);
-	void buildQueryProfileLocalSseU8(bool fw);
+    /**
+     * Align nucleotides from read 'rd' to the reference string 'rf' using
+     * vector instructions.  Return the score of the best alignment found, or
+     * the minimum integer if an alignment could not be found.  Flag is set to
+     * 0 if an alignment is found, -1 if no valid alignment is found, or -2 if
+     * the score saturated at any point during alignment.
+     */
+    TAlScore alignNucleotidesEnd2EndSseU8(  // unsigned 8-bit elements
+        int& flag, bool debug);
+    TAlScore alignNucleotidesLocalSseU8(    // unsigned 8-bit elements
+        int& flag, bool debug);
+    TAlScore alignNucleotidesEnd2EndSseI16( // signed 16-bit elements
+        int& flag, bool debug);
+    TAlScore alignNucleotidesLocalSseI16(   // signed 16-bit elements
+        int& flag, bool debug);
+    
+    /**
+     * Aligns by filling a dynamic programming matrix with the SSE-accelerated,
+     * banded DP approach of Farrar.  As it goes, it determines which cells we
+     * might backtrace from and tallies the best (highest-scoring) N backtrace
+     * candidate cells per diagonal.  Also returns the alignment score of the best
+     * alignment in the matrix.
+     *
+     * This routine does *not* maintain a matrix holding the entire matrix worth of
+     * scores, nor does it maintain any other dense O(mn) data structure, as this
+     * would quickly exhaust memory for queries longer than about 10,000 kb.
+     * Instead, in the fill stage it maintains two columns worth of scores at a
+     * time (current/previous, or right/left) - these take O(m) space.  When
+     * finished with the current column, it determines which cells from the
+     * previous column, if any, are candidates we might backtrace from to find a
+     * full alignment.  A candidate cell has a score that rises above the threshold
+     * and isn't improved upon by a match in the next column.  The best N
+     * candidates per diagonal are stored in a O(m + n) data structure.
+     */
+    TAlScore alignGatherEE8(                // unsigned 8-bit elements
+        int& flag, bool debug);
+    TAlScore alignGatherLoc8(               // unsigned 8-bit elements
+        int& flag, bool debug);
+    TAlScore alignGatherEE16(               // signed 16-bit elements
+        int& flag, bool debug);
+    TAlScore alignGatherLoc16(              // signed 16-bit elements
+        int& flag, bool debug);
+    
+    /**
+     * Build query profile look up tables for the read.  The query profile look
+     * up table is organized as a 1D array indexed by [i][j] where i is the
+     * reference character in the current DP column (0=A, 1=C, etc), and j is
+     * the segment of the query we're currently working on.
+     */
+    void buildQueryProfileEnd2EndSseU8(bool fw);
+    void buildQueryProfileLocalSseU8(bool fw);
 
-	/**
-	 * Build query profile look up tables for the read.  The query profile look
-	 * up table is organized as a 1D array indexed by [i][j] where i is the
-	 * reference character in the current DP column (0=A, 1=C, etc), and j is
-	 * the segment of the query we're currently working on.
-	 */
-	void buildQueryProfileEnd2EndSseI16(bool fw);
-	void buildQueryProfileLocalSseI16(bool fw);
-	
-	bool gatherCellsNucleotidesLocalSseU8(TAlScore best);
-	bool gatherCellsNucleotidesEnd2EndSseU8(TAlScore best);
+    /**
+     * Build query profile look up tables for the read.  The query profile look
+     * up table is organized as a 1D array indexed by [i][j] where i is the
+     * reference character in the current DP column (0=A, 1=C, etc), and j is
+     * the segment of the query we're currently working on.
+     */
+    void buildQueryProfileEnd2EndSseI16(bool fw);
+    void buildQueryProfileLocalSseI16(bool fw);
+    
+    bool gatherCellsNucleotidesLocalSseU8(TAlScore best);
+    bool gatherCellsNucleotidesEnd2EndSseU8(TAlScore best);
 
-	bool gatherCellsNucleotidesLocalSseI16(TAlScore best);
-	bool gatherCellsNucleotidesEnd2EndSseI16(TAlScore best);
+    bool gatherCellsNucleotidesLocalSseI16(TAlScore best);
+    bool gatherCellsNucleotidesEnd2EndSseI16(TAlScore best);
 
-	bool backtraceNucleotidesLocalSseU8(
-		TAlScore       escore, // in: expected score
-		SwResult&      res,    // out: store results (edits and scores) here
-		size_t&        off,    // out: store diagonal projection of origin
-		size_t&        nbts,   // out: # backtracks
-		size_t         row,    // start in this rectangle row
-		size_t         col,    // start in this rectangle column
-		RandomSource&  rand);  // random gen, to choose among equal paths
+    bool backtraceNucleotidesLocalSseU8(
+        TAlScore       escore, // in: expected score
+        SwResult&      res,    // out: store results (edits and scores) here
+        size_t&        off,    // out: store diagonal projection of origin
+        size_t&        nbts,   // out: # backtracks
+        size_t         row,    // start in this rectangle row
+        size_t         col,    // start in this rectangle column
+        RandomSource&  rand);  // random gen, to choose among equal paths
 
-	bool backtraceNucleotidesLocalSseI16(
-		TAlScore       escore, // in: expected score
-		SwResult&      res,    // out: store results (edits and scores) here
-		size_t&        off,    // out: store diagonal projection of origin
-		size_t&        nbts,   // out: # backtracks
-		size_t         row,    // start in this rectangle row
-		size_t         col,    // start in this rectangle column
-		RandomSource&  rand);  // random gen, to choose among equal paths
+    bool backtraceNucleotidesLocalSseI16(
+        TAlScore       escore, // in: expected score
+        SwResult&      res,    // out: store results (edits and scores) here
+        size_t&        off,    // out: store diagonal projection of origin
+        size_t&        nbts,   // out: # backtracks
+        size_t         row,    // start in this rectangle row
+        size_t         col,    // start in this rectangle column
+        RandomSource&  rand);  // random gen, to choose among equal paths
 
-	bool backtraceNucleotidesEnd2EndSseU8(
-		TAlScore       escore, // in: expected score
-		SwResult&      res,    // out: store results (edits and scores) here
-		size_t&        off,    // out: store diagonal projection of origin
-		size_t&        nbts,   // out: # backtracks
-		size_t         row,    // start in this rectangle row
-		size_t         col,    // start in this rectangle column
-		RandomSource&  rand);  // random gen, to choose among equal paths
+    bool backtraceNucleotidesEnd2EndSseU8(
+        TAlScore       escore, // in: expected score
+        SwResult&      res,    // out: store results (edits and scores) here
+        size_t&        off,    // out: store diagonal projection of origin
+        size_t&        nbts,   // out: # backtracks
+        size_t         row,    // start in this rectangle row
+        size_t         col,    // start in this rectangle column
+        RandomSource&  rand);  // random gen, to choose among equal paths
 
-	bool backtraceNucleotidesEnd2EndSseI16(
-		TAlScore       escore, // in: expected score
-		SwResult&      res,    // out: store results (edits and scores) here
-		size_t&        off,    // out: store diagonal projection of origin
-		size_t&        nbts,   // out: # backtracks
-		size_t         row,    // start in this rectangle row
-		size_t         col,    // start in this rectangle column
-		RandomSource&  rand);  // random gen, to choose among equal paths
+    bool backtraceNucleotidesEnd2EndSseI16(
+        TAlScore       escore, // in: expected score
+        SwResult&      res,    // out: store results (edits and scores) here
+        size_t&        off,    // out: store diagonal projection of origin
+        size_t&        nbts,   // out: # backtracks
+        size_t         row,    // start in this rectangle row
+        size_t         col,    // start in this rectangle column
+        RandomSource&  rand);  // random gen, to choose among equal paths
 
-	bool backtrace(
-		TAlScore       escore, // in: expected score
-		bool           fill,   // in: use mini-fill?
-		bool           usecp,  // in: use checkpoints?
-		SwResult&      res,    // out: store results (edits and scores) here
-		size_t&        off,    // out: store diagonal projection of origin
-		size_t         row,    // start in this rectangle row
-		size_t         col,    // start in this rectangle column
-		size_t         maxiter,// max # extensions to try
-		size_t&        niter,  // # extensions tried
-		RandomSource&  rnd)    // random gen, to choose among equal paths
-	{
-		bter_.initBt(
-			escore,              // in: alignment score
-			row,                 // in: start in this row
-			col,                 // in: start in this column
-			fill,                // in: use mini-fill?
-			usecp,               // in: use checkpoints?
-			cperTri_,            // in: triangle-shaped mini-fills?
-			rnd);                // in: random gen, to choose among equal paths
-		assert(bter_.inited());
-		size_t nrej = 0;
-		if(bter_.emptySolution()) {
-			return false;
-		} else {
-			return bter_.nextAlignment(maxiter, res, off, nrej, niter, rnd);
-		}
-	}
-	
-	
+    bool backtrace(
+        TAlScore       escore, // in: expected score
+        bool           fill,   // in: use mini-fill?
+        bool           usecp,  // in: use checkpoints?
+        SwResult&      res,    // out: store results (edits and scores) here
+        size_t&        off,    // out: store diagonal projection of origin
+        size_t         row,    // start in this rectangle row
+        size_t         col,    // start in this rectangle column
+        size_t         maxiter,// max # extensions to try
+        size_t&        niter,  // # extensions tried
+        RandomSource&  rnd)    // random gen, to choose among equal paths
+    {
+        bter_.initBt(
+            escore,              // in: alignment score
+            row,                 // in: start in this row
+            col,                 // in: start in this column
+            fill,                // in: use mini-fill?
+            usecp,               // in: use checkpoints?
+            cperTri_,            // in: triangle-shaped mini-fills?
+            rnd);                // in: random gen, to choose among equal paths
+        assert(bter_.inited());
+        size_t nrej = 0;
+        if(bter_.emptySolution()) {
+            return false;
+        } else {
+            return bter_.nextAlignment(maxiter, res, off, nrej, niter, rnd);
+        }
+    }
+    
+    
 
-	const BTDnaString  *rd_;     // read sequence
-	const BTString     *qu_;     // read qualities
-	const BTDnaString  *rdfw_;   // read sequence for fw read
-	const BTDnaString  *rdrc_;   // read sequence for rc read
-	const BTString     *qufw_;   // read qualities for fw read
-	const BTString     *qurc_;   // read qualities for rc read
-	TReadOff            rdi_;    // offset of first read char to align
-	TReadOff            rdf_;    // offset of last read char to align
-	bool                fw_;     // true iff read sequence is original fw read
-	TRefId              refidx_; // id of reference aligned against
-	TRefOff             reflen_; // length of entire reference sequence
-	const DPRect*       rect_;   // DP rectangle
-	char               *rf_;     // reference sequence
-	TRefOff             rfi_;    // offset of first ref char to align to
-	TRefOff             rff_;    // offset of last ref char to align to (excl)
-	size_t              rdgap_;  // max # gaps in read
-	size_t              rfgap_;  // max # gaps in reference
-	bool                enable8_;// enable 8-bit sse
-	bool                extend_; // true iff this is a seed-extend problem
-	const Scoring      *sc_;     // penalties for edit types
-	TAlScore            minsc_;  // penalty ceiling for valid alignments
-	int                 nceil_;  // max # Ns allowed in ref portion of aln
+    const BTDnaString  *rd_;     // read sequence
+    const BTString     *qu_;     // read qualities
+    const BTDnaString  *rdfw_;   // read sequence for fw read
+    const BTDnaString  *rdrc_;   // read sequence for rc read
+    const BTString     *qufw_;   // read qualities for fw read
+    const BTString     *qurc_;   // read qualities for rc read
+    TReadOff            rdi_;    // offset of first read char to align
+    TReadOff            rdf_;    // offset of last read char to align
+    bool                fw_;     // true iff read sequence is original fw read
+    TRefId              refidx_; // id of reference aligned against
+    TRefOff             reflen_; // length of entire reference sequence
+    const DPRect*       rect_;   // DP rectangle
+    char               *rf_;     // reference sequence
+    TRefOff             rfi_;    // offset of first ref char to align to
+    TRefOff             rff_;    // offset of last ref char to align to (excl)
+    size_t              rdgap_;  // max # gaps in read
+    size_t              rfgap_;  // max # gaps in reference
+    bool                enable8_;// enable 8-bit sse
+    bool                extend_; // true iff this is a seed-extend problem
+    const Scoring      *sc_;     // penalties for edit types
+    TAlScore            minsc_;  // penalty ceiling for valid alignments
+    int                 nceil_;  // max # Ns allowed in ref portion of aln
 
-	bool                sse8succ_;  // whether 8-bit worked
-	bool                sse16succ_; // whether 16-bit worked
-	SSEData             sseU8fw_;   // buf for fw query, 8-bit score
-	SSEData             sseU8rc_;   // buf for rc query, 8-bit score
-	SSEData             sseI16fw_;  // buf for fw query, 16-bit score
-	SSEData             sseI16rc_;  // buf for rc query, 16-bit score
-	bool                sseU8fwBuilt_;   // built fw query profile, 8-bit score
-	bool                sseU8rcBuilt_;   // built rc query profile, 8-bit score
-	bool                sseI16fwBuilt_;  // built fw query profile, 16-bit score
-	bool                sseI16rcBuilt_;  // built rc query profile, 16-bit score
+    bool                sse8succ_;  // whether 8-bit worked
+    bool                sse16succ_; // whether 16-bit worked
+    SSEData             sseU8fw_;   // buf for fw query, 8-bit score
+    SSEData             sseU8rc_;   // buf for rc query, 8-bit score
+    SSEData             sseI16fw_;  // buf for fw query, 16-bit score
+    SSEData             sseI16rc_;  // buf for rc query, 16-bit score
+    bool                sseU8fwBuilt_;   // built fw query profile, 8-bit score
+    bool                sseU8rcBuilt_;   // built rc query profile, 8-bit score
+    bool                sseI16fwBuilt_;  // built fw query profile, 16-bit score
+    bool                sseI16rcBuilt_;  // built rc query profile, 16-bit score
 
-	SSEMetrics			sseU8ExtendMet_;
-	SSEMetrics			sseU8MateMet_;
-	SSEMetrics			sseI16ExtendMet_;
-	SSEMetrics			sseI16MateMet_;
+    SSEMetrics          sseU8ExtendMet_;
+    SSEMetrics          sseU8MateMet_;
+    SSEMetrics          sseI16ExtendMet_;
+    SSEMetrics          sseI16MateMet_;
 
-	int                 state_;        // state
-	bool                initedRead_;   // true iff initialized with initRead
-	bool                readSse16_;    // true -> sse16 from now on for read
-	bool                initedRef_;    // true iff initialized with initRef
-	EList<uint32_t>     rfwbuf_;       // buffer for wordized ref stretches
-	
-	EList<DpNucFrame>    btnstack_;    // backtrace stack for nucleotides
-	EList<SizeTPair>     btcells_;     // cells involved in current backtrace
+    int                 state_;        // state
+    bool                initedRead_;   // true iff initialized with initRead
+    bool                readSse16_;    // true -> sse16 from now on for read
+    bool                initedRef_;    // true iff initialized with initRef
+    EList<uint32_t>     rfwbuf_;       // buffer for wordized ref stretches
+    
+    EList<DpNucFrame>    btnstack_;    // backtrace stack for nucleotides
+    EList<SizeTPair>     btcells_;     // cells involved in current backtrace
 
-	NBest<DpBtCandidate> btdiag_;      // per-diagonal backtrace candidates
-	EList<DpBtCandidate> btncand_;     // cells we might backtrace from
-	EList<DpBtCandidate> btncanddone_; // candidates that we investigated
-	size_t              btncanddoneSucc_; // # investigated and succeeded
-	size_t              btncanddoneFail_; // # investigated and failed
-	
-	BtBranchTracer       bter_;        // backtracer
-	
-	Checkpointer         cper_;        // structure for saving checkpoint cells
-	size_t               cperMinlen_;  // minimum length for using checkpointer
-	size_t               cperPerPow2_; // checkpoint every 1 << perpow2 diags (& next)
-	bool                 cperEf_;      // store E and F in addition to H?
-	bool                 cperTri_;     // checkpoint for triangular mini-fills?
-	
-	size_t              colstop_;      // bailed on DP loop after this many cols
-	size_t              lastsolcol_;   // last DP col with valid cell
-	size_t              cural_;        // index of next alignment to be given
-	
-	uint64_t nbtfiltst_; // # candidates filtered b/c starting cell was seen
-	uint64_t nbtfiltsc_; // # candidates filtered b/c score uninteresting
-	uint64_t nbtfiltdo_; // # candidates filtered b/c dominated by other cell
-	
-	std::ostream *dpLog_;
-	bool firstRead_;
-	
-	ASSERT_ONLY(SStringExpandable<uint32_t> tmp_destU32_);
-	ASSERT_ONLY(BTDnaString tmp_editstr_, tmp_refstr_);
-	ASSERT_ONLY(EList<DpBtCandidate> cand_tmp_);
+    NBest<DpBtCandidate> btdiag_;      // per-diagonal backtrace candidates
+    EList<DpBtCandidate> btncand_;     // cells we might backtrace from
+    EList<DpBtCandidate> btncanddone_; // candidates that we investigated
+    size_t              btncanddoneSucc_; // # investigated and succeeded
+    size_t              btncanddoneFail_; // # investigated and failed
+    
+    BtBranchTracer       bter_;        // backtracer
+    
+    Checkpointer         cper_;        // structure for saving checkpoint cells
+    size_t               cperMinlen_;  // minimum length for using checkpointer
+    size_t               cperPerPow2_; // checkpoint every 1 << perpow2 diags (& next)
+    bool                 cperEf_;      // store E and F in addition to H?
+    bool                 cperTri_;     // checkpoint for triangular mini-fills?
+    
+    size_t              colstop_;      // bailed on DP loop after this many cols
+    size_t              lastsolcol_;   // last DP col with valid cell
+    size_t              cural_;        // index of next alignment to be given
+    
+    uint64_t nbtfiltst_; // # candidates filtered b/c starting cell was seen
+    uint64_t nbtfiltsc_; // # candidates filtered b/c score uninteresting
+    uint64_t nbtfiltdo_; // # candidates filtered b/c dominated by other cell
+    
+    std::ostream *dpLog_;
+    bool firstRead_;
+    
+    ASSERT_ONLY(SStringExpandable<uint32_t> tmp_destU32_);
+    ASSERT_ONLY(BTDnaString tmp_editstr_, tmp_refstr_);
+    ASSERT_ONLY(EList<DpBtCandidate> cand_tmp_);
 };
 
 #endif /*ALIGNER_SW_H_*/
